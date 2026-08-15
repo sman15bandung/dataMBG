@@ -1609,7 +1609,7 @@
                 const json = await res.json();
                 if (json.status !== 'success') {
                     console.error('Apps Script error (markDelivery):', json);
-                    return false;
+                    return { ok: false, message: json.message || 'Server menolak permintaan (tanpa pesan error).' };
                 }
                 const patch = {
                     id: id,
@@ -1627,10 +1627,10 @@
                 }
                 upsertLocalRecord(patch);
                 renderPetugasTable();
-                return true;
+                return { ok: true };
             } catch (err) {
                 console.error(err);
-                return false;
+                return { ok: false, message: err.message || 'Gagal terhubung ke server (jaringan/CORS).' };
             }
         }
 
@@ -1644,7 +1644,7 @@
                 const json = await res.json();
                 if (json.status !== 'success') {
                     console.error('Apps Script error (markTray):', json);
-                    return false;
+                    return { ok: false, message: json.message || 'Server menolak permintaan (tanpa pesan error).' };
                 }
                 upsertLocalRecord({
                     id: id,
@@ -1654,23 +1654,23 @@
                     trayPhotoUrl: json.trayPhotoUrl || ''
                 });
                 renderPetugasTable();
-                return true;
+                return { ok: true };
             } catch (err) {
                 console.error(err);
-                return false;
+                return { ok: false, message: err.message || 'Gagal terhubung ke server (jaringan/CORS).' };
             }
         }
 
         // Dipakai tombol "Ubah" (batalkan status yang sudah dicatat) -- di luar
         // modal, jadi errornya ditampilkan lewat showAlert biasa.
         async function undoDelivery(id) {
-            const ok = await markDelivery(id, '');
-            if (!ok) showAlert('error', 'Gagal membatalkan status penyerahan. Cek koneksi internet Anda.');
+            const result = await markDelivery(id, '');
+            if (!result.ok) showAlert('error', `Gagal membatalkan status penyerahan: ${result.message}`);
         }
 
         async function undoTray(id) {
-            const ok = await markTray(id, '');
-            if (!ok) showAlert('error', 'Gagal membatalkan status tray. Cek koneksi internet Anda.');
+            const result = await markTray(id, '');
+            if (!result.ok) showAlert('error', `Gagal membatalkan status tray: ${result.message}`);
         }
 
         // Kompres & ubah file foto jadi data URL base64 (JPEG, lebar maks 1000px)
@@ -1861,22 +1861,23 @@
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
 
-            let ok;
+            let result;
             if (mode === 'delivery') {
-                ok = await markDelivery(id, status, isMatch ? undefined : value, capturedPhotoDataUrl);
+                result = await markDelivery(id, status, isMatch ? undefined : value, capturedPhotoDataUrl);
             } else {
-                ok = await markTray(id, status, isMatch ? undefined : value, capturedPhotoDataUrl);
+                result = await markTray(id, status, isMatch ? undefined : value, capturedPhotoDataUrl);
             }
 
             submitBtn.disabled = false;
             submitBtn.innerHTML = 'Simpan';
 
-            if (ok) {
+            if (result.ok) {
                 closeCorrectionModal();
             } else {
-                // Gagal -- modal TETAP terbuka & error ditampilkan di dalam modal
-                // (bukan di alert belakang layar yang tertutup modal ini).
-                errorMsgEl.innerText = 'Gagal menyimpan ke spreadsheet. Cek koneksi internet, lalu coba lagi.';
+                // Gagal -- modal TETAP terbuka & pesan error ASLI dari server
+                // ditampilkan di dalam modal (bukan di alert belakang layar
+                // yang tertutup modal ini).
+                errorMsgEl.innerText = result.message;
                 errorMsgEl.classList.remove('hidden');
             }
         }
