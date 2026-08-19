@@ -565,7 +565,7 @@
                 <!-- Data MBG yang Sudah Diserahkan -->
                 <div>
                     <p class="text-xs font-bold text-brand-dark mb-2 flex items-center gap-1.5">
-                        <i class="fa-solid fa-box-open text-brand-primary"></i> Data MBG yang Sudah Diserahkan
+                        <i class="fa-solid fa-box-open text-brand-primary"></i> Ranking Penyerahan MBG (Tercepat - Terlambat)
                     </p>
                     <div id="petugasDeliveredList" class="space-y-1.5"></div>
                 </div>
@@ -573,7 +573,7 @@
                 <!-- Data Tray yang Sudah Dikembalikan -->
                 <div>
                     <p class="text-xs font-bold text-brand-dark mb-2 flex items-center gap-1.5">
-                        <i class="fa-solid fa-recycle text-brand-primary"></i> Data Tray yang Sudah Dikembalikan
+                        <i class="fa-solid fa-recycle text-brand-primary"></i> Ranking Pengembalian Tray (Tercepat - Terlambat)
                     </p>
                     <div id="petugasTrayList" class="space-y-1.5"></div>
                 </div>
@@ -963,6 +963,87 @@
             return 'Lainnya';
         }
 
+        // Fungsi generik: bangun HTML ranking "tercepat sampai terlambat" per
+        // tingkat kelas (X, XI, XII), berdasarkan field waktu tertentu.
+        // Dipakai untuk: input presensi tercepat, penyerahan MBG, & pengembalian
+        // tray -- ketiganya butuh tampilan yang sama, cuma field waktu & detail
+        // tambahannya beda.
+        //   records   : daftar record yang MAU dirangking (sudah difilter relevan)
+        //   timeField : nama field waktu, mis. 'timestamp' / 'deliveredAt' / 'trayReturnedAt'
+        //   detailFn  : (opsional) function(record) -> HTML kecil tambahan di sebelah nama kelas
+        //   linkFn    : (opsional) function(record) -> HTML link tambahan (mis. link foto)
+        //   emptyGradeText : teks saat 1 tingkat kelas belum ada datanya
+        function buildGradeRankingHtml(records, timeField, detailFn, linkFn, emptyGradeText) {
+            const grades = ['X', 'XI', 'XII'];
+            const medals = ['🥇', '🥈', '🥉'];
+
+            return grades.map(grade => {
+                // Yang punya waktu tercatat diurutkan tercepat dulu (dapat rank & medali),
+                // yang belum punya waktu tetap ditampilkan di bagian bawah grup.
+                const gradeRecords = records
+                    .filter(r => getClassGrade(r.className) === grade)
+                    .sort((a, b) => {
+                        const ta = a[timeField], tb = b[timeField];
+                        if (ta && tb) return new Date(ta) - new Date(tb);
+                        if (ta && !tb) return -1;
+                        if (!ta && tb) return 1;
+                        return compareClassName(a.className, b.className);
+                    });
+
+                let itemsHtml;
+                if (gradeRecords.length === 0) {
+                    itemsHtml = `<p class="text-xs text-slate-400 italic py-2">${emptyGradeText || `Belum ada kelas tingkat ${grade}.`}</p>`;
+                } else {
+                    let timedRankCounter = 0;
+                    itemsHtml = gradeRecords.map((r) => {
+                        const hasTime = !!r[timeField];
+                        const rankIdx = hasTime ? timedRankCounter++ : -1;
+
+                        const time = hasTime
+                            ? new Date(r[timeField]).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                            : 'Waktu tidak tercatat';
+
+                        const rankBadge = hasTime && rankIdx < 3
+                            ? `<span class="text-base">${medals[rankIdx]}</span>`
+                            : `<span class="text-xs font-bold text-slate-400 w-5 text-center inline-block">${hasTime ? '#' + (rankIdx + 1) : '-'}</span>`;
+
+                        const rowStyle = hasTime && rankIdx === 0
+                            ? 'bg-amber-50 border-amber-200'
+                            : 'bg-slate-50 border-slate-100';
+
+                        const timeClass = hasTime ? 'text-slate-500' : 'text-slate-300 italic';
+                        const detailHtml = detailFn ? detailFn(r) : '';
+                        const linkHtml = linkFn ? linkFn(r) : '';
+
+                        return `
+                            <div class="flex items-center justify-between p-2 rounded-lg border ${rowStyle}">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-5 text-center">${rankBadge}</span>
+                                    <span class="font-semibold text-xs text-slate-800">${r.className}</span>
+                                    ${detailHtml}
+                                </div>
+                                <div class="flex items-center gap-2.5">
+                                    ${linkHtml}
+                                    <span class="text-[11px] font-mono ${timeClass} flex items-center gap-1">
+                                        <i class="fa-regular fa-clock"></i> ${time}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                return `
+                    <div>
+                        <p class="text-xs font-bold text-brand-dark mb-1.5 flex items-center gap-1.5 uppercase tracking-wide">
+                            <i class="fa-solid fa-layer-group text-brand-primary"></i> Kelas ${grade}
+                        </p>
+                        <div class="space-y-1.5">${itemsHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
         function renderLeaderboard() {
             const dateVal = document.getElementById('inputDate').value;
             const labelEl = document.getElementById('leaderboardDateLabel');
@@ -978,67 +1059,7 @@
                 return;
             }
 
-            const grades = ['X', 'XI', 'XII'];
-            const medals = ['🥇', '🥈', '🥉'];
-
-            listEl.innerHTML = grades.map(grade => {
-                // Yang punya waktu tercatat diurutkan tercepat dulu (dapat rank & medali),
-                // yang belum punya waktu (data lama) tetap ditampilkan di bagian bawah grup.
-                const gradeRecords = records
-                    .filter(r => getClassGrade(r.className) === grade)
-                    .sort((a, b) => {
-                        if (a.timestamp && b.timestamp) return new Date(a.timestamp) - new Date(b.timestamp);
-                        if (a.timestamp && !b.timestamp) return -1;
-                        if (!a.timestamp && b.timestamp) return 1;
-                        return compareClassName(a.className, b.className);
-                    });
-
-                let itemsHtml;
-                if (gradeRecords.length === 0) {
-                    itemsHtml = `<p class="text-xs text-slate-400 italic py-2">Belum ada kelas tingkat ${grade} yang input hari ini.</p>`;
-                } else {
-                    let timedRankCounter = 0;
-                    itemsHtml = gradeRecords.map((r) => {
-                        const hasTime = !!r.timestamp;
-                        const rankIdx = hasTime ? timedRankCounter++ : -1;
-
-                        const time = hasTime
-                            ? new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                            : 'Waktu tidak tercatat';
-
-                        const rankBadge = hasTime && rankIdx < 3
-                            ? `<span class="text-base">${medals[rankIdx]}</span>`
-                            : `<span class="text-xs font-bold text-slate-400 w-5 text-center inline-block">${hasTime ? '#' + (rankIdx + 1) : '-'}</span>`;
-
-                        const rowStyle = hasTime && rankIdx === 0
-                            ? 'bg-amber-50 border-amber-200'
-                            : 'bg-slate-50 border-slate-100';
-
-                        const timeClass = hasTime ? 'text-slate-500' : 'text-slate-300 italic';
-
-                        return `
-                            <div class="flex items-center justify-between p-2 rounded-lg border ${rowStyle}">
-                                <div class="flex items-center gap-2.5">
-                                    <span class="w-5 text-center">${rankBadge}</span>
-                                    <span class="font-semibold text-xs text-slate-800">${r.className}</span>
-                                </div>
-                                <span class="text-[11px] font-mono ${timeClass} flex items-center gap-1">
-                                    <i class="fa-regular fa-clock"></i> ${time}
-                                </span>
-                            </div>
-                        `;
-                    }).join('');
-                }
-
-                return `
-                    <div>
-                        <p class="text-xs font-bold text-brand-dark mb-1.5 flex items-center gap-1.5 uppercase tracking-wide">
-                            <i class="fa-solid fa-layer-group text-brand-primary"></i> Kelas ${grade}
-                        </p>
-                        <div class="space-y-1.5">${itemsHtml}</div>
-                    </div>
-                `;
-            }).join('');
+            listEl.innerHTML = buildGradeRankingHtml(records, 'timestamp', null, null, 'Belum ada kelas tingkat ini yang input hari ini.');
         }
 
         // --- SISTEM POIN RANKING (dipakai rekap bulanan) ---
@@ -1530,72 +1551,46 @@
                 `;
             }).join('');
 
-            // Daftar yang sudah diserahkan
-            const deliveredRecords = records
-                .filter(r => r.deliveryStatus === 'sesuai' || r.deliveryStatus === 'tidak_sesuai')
-                .sort((a, b) => new Date(a.deliveredAt || 0) - new Date(b.deliveredAt || 0));
+            // Ranking penyerahan MBG (tercepat -> terlambat), per tingkat kelas
+            const deliveredRecords = records.filter(r => r.deliveryStatus === 'sesuai' || r.deliveryStatus === 'tidak_sesuai');
 
             if (deliveredRecords.length === 0) {
                 deliveredListEl.innerHTML = `<p class="text-xs text-slate-400 italic py-2">Belum ada yang diserahkan.</p>`;
             } else {
-                deliveredListEl.innerHTML = deliveredRecords.map(r => {
-                    const time = r.deliveredAt
-                        ? new Date(r.deliveredAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                        : '-';
-                    const isMatch = r.deliveryStatus === 'sesuai';
-                    const badgeClass = isMatch ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200';
-                    const iconClass = isMatch ? 'fa-circle-check text-emerald-600' : 'fa-triangle-exclamation text-amber-600';
-                    const photoLink = r.deliveryPhotoUrl
+                deliveredListEl.innerHTML = buildGradeRankingHtml(
+                    deliveredRecords,
+                    'deliveredAt',
+                    (r) => {
+                        const isMatch = r.deliveryStatus === 'sesuai';
+                        const iconClass = isMatch ? 'fa-circle-check text-emerald-600' : 'fa-triangle-exclamation text-amber-600';
+                        return `<i class="fa-solid ${iconClass}"></i><span class="text-[11px] text-slate-500">(${r.actualDelivered}/${r.total} siswa)</span>`;
+                    },
+                    (r) => r.deliveryPhotoUrl
                         ? `<a href="${r.deliveryPhotoUrl}" target="_blank" rel="noopener" class="text-[11px] text-sky-600 hover:underline flex items-center gap-1"><i class="fa-solid fa-camera"></i> Foto</a>`
-                        : '';
-                    return `
-                        <div class="flex items-center justify-between p-2 rounded-lg border ${badgeClass}">
-                            <div class="flex items-center gap-2">
-                                <i class="fa-solid ${iconClass}"></i>
-                                <span class="font-semibold text-xs text-slate-800">${r.className}</span>
-                                <span class="text-[11px] text-slate-500">(${r.actualDelivered}/${r.total} siswa)</span>
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                                ${photoLink}
-                                <span class="text-[11px] font-mono text-slate-500">${time}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+                        : '',
+                    'Belum ada kelas tingkat ini yang diserahkan.'
+                );
             }
 
-            // Daftar tray yang sudah dikembalikan
-            const trayRecords = records
-                .filter(r => r.trayStatus === 'sesuai' || r.trayStatus === 'tidak_sesuai')
-                .sort((a, b) => new Date(a.trayReturnedAt || 0) - new Date(b.trayReturnedAt || 0));
+            // Ranking pengembalian tray MBG (tercepat -> terlambat), per tingkat kelas
+            const trayRecords = records.filter(r => r.trayStatus === 'sesuai' || r.trayStatus === 'tidak_sesuai');
 
             if (trayRecords.length === 0) {
                 trayListEl.innerHTML = `<p class="text-xs text-slate-400 italic py-2">Belum ada tray yang dikembalikan.</p>`;
             } else {
-                trayListEl.innerHTML = trayRecords.map(r => {
-                    const time = r.trayReturnedAt
-                        ? new Date(r.trayReturnedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                        : '-';
-                    const isMatch = r.trayStatus === 'sesuai';
-                    const badgeClass = isMatch ? 'bg-sky-50 border-sky-200' : 'bg-rose-50 border-rose-200';
-                    const iconClass = isMatch ? 'fa-circle-check text-sky-600' : 'fa-triangle-exclamation text-rose-600';
-                    const photoLink = r.trayPhotoUrl
+                trayListEl.innerHTML = buildGradeRankingHtml(
+                    trayRecords,
+                    'trayReturnedAt',
+                    (r) => {
+                        const isMatch = r.trayStatus === 'sesuai';
+                        const iconClass = isMatch ? 'fa-circle-check text-sky-600' : 'fa-triangle-exclamation text-rose-600';
+                        return `<i class="fa-solid ${iconClass}"></i><span class="text-[11px] text-slate-500">(${r.trayReturned} tray, diserahkan ${r.actualDelivered})</span>`;
+                    },
+                    (r) => r.trayPhotoUrl
                         ? `<a href="${r.trayPhotoUrl}" target="_blank" rel="noopener" class="text-[11px] text-sky-600 hover:underline flex items-center gap-1"><i class="fa-solid fa-camera"></i> Foto</a>`
-                        : '';
-                    return `
-                        <div class="flex items-center justify-between p-2 rounded-lg border ${badgeClass}">
-                            <div class="flex items-center gap-2">
-                                <i class="fa-solid ${iconClass}"></i>
-                                <span class="font-semibold text-xs text-slate-800">${r.className}</span>
-                                <span class="text-[11px] text-slate-500">(${r.trayReturned} tray, diserahkan ${r.actualDelivered})</span>
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                                ${photoLink}
-                                <span class="text-[11px] font-mono text-slate-500">${time}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+                        : '',
+                    'Belum ada kelas tingkat ini yang mengembalikan tray.'
+                );
             }
         }
 
@@ -2201,22 +2196,38 @@
             // Table Header definition
             const tableHeaders = [['No', 'Nama Kelas', 'Total Siswa', 'Jumlah Hadir', 'Tanda Tangan Penerima']];
 
-            // --- 4. GENERATE AUTOTABLE ---
+            // --- 4. GENERATE AUTOTABLE (ukuran font/baris menyesuaikan jumlah
+            // kelas secara otomatis, supaya selalu muat dalam 1 halaman) ---
+            const rowCount = tableRows.length;
+            let bodyFontSize, headFontSize, footFontSize, cellPad;
+            if (rowCount <= 15) {
+                bodyFontSize = 9; headFontSize = 9.5; footFontSize = 9.5; cellPad = 2.2;
+            } else if (rowCount <= 25) {
+                bodyFontSize = 8; headFontSize = 8.5; footFontSize = 8.5; cellPad = 1.6;
+            } else if (rowCount <= 35) {
+                bodyFontSize = 7; headFontSize = 7.5; footFontSize = 7.5; cellPad = 1.1;
+            } else {
+                bodyFontSize = 6; headFontSize = 6.5; footFontSize = 6.5; cellPad = 0.8;
+            }
+
             doc.autoTable({
-                startY: 50,
+                startY: 48,
                 head: tableHeaders,
                 body: tableRows,
                 theme: 'grid',
+                margin: { bottom: 30 }, // sisakan ruang buat blok tanda tangan
                 headStyles: {
                     fillColor: [14, 122, 65], // Brand Primary Green
                     textColor: [255, 255, 255],
                     fontStyle: 'bold',
                     halign: 'center',
-                    fontSize: 9
+                    fontSize: headFontSize,
+                    cellPadding: cellPad
                 },
                 bodyStyles: {
-                    fontSize: 8.5,
-                    textColor: [30, 41, 59]
+                    fontSize: bodyFontSize,
+                    textColor: [30, 41, 59],
+                    cellPadding: cellPad
                 },
                 columnStyles: {
                     0: { halign: 'center', cellWidth: 12 },
@@ -2234,30 +2245,29 @@
                 footStyles: {
                     fillColor: [232, 245, 233], // Soft Green Pastel
                     textColor: [0, 77, 40],
-                    fontSize: 9
+                    fontSize: footFontSize,
+                    cellPadding: cellPad
                 }
             });
 
             // --- 5. TANDA TANGAN SERAH TERIMA ---
-            const finalY = doc.lastAutoTable.finalY + 12;
-
-            // Prevent signature overflow page
-            if (finalY + 35 > 280) {
-                doc.addPage();
-            }
+            // Blok tanda tangan dibuat ringkas & TIDAK memicu halaman baru --
+            // ukuran tabel di atas sudah disesuaikan supaya selalu ada ruang
+            // cukup di bawahnya untuk blok ini dalam 1 halaman yang sama.
+            const finalY = Math.min(doc.lastAutoTable.finalY + 10, 265);
 
             doc.setFontSize(9);
             doc.setFont('helvetica', 'normal');
 
             // Left Side: Tim Distribusi MBG
             doc.text("Penyedia / Tim MBG,", 25, finalY);
-            doc.text("-----------------------------", 25, finalY + 20);
-            doc.text("NIP/NIK.", 25, finalY + 24);
+            doc.text("-----------------------------", 25, finalY + 18);
+            doc.text("NIP/NIK.", 25, finalY + 22);
 
             // Right Side: Penanggung Jawab Sekolah
             doc.text(`Bandung, ${formattedDate}`, 130, finalY);
             doc.text("Penanggung Jawab MBG SMAN 15,", 130, finalY + 5);
-            doc.text("-----------------------------", 130, finalY + 25);
+            doc.text("-----------------------------", 130, finalY + 23);
             doc.text("NIP.", 130, finalY + 29);
 
             // Save PDF
